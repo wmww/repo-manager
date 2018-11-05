@@ -132,7 +132,6 @@ class Directory:
             result += indent_a + key
             v = val.__str__(color=color)
             if v:
-                indent_b += '  '
                 v = ': ' + v
                 v = v.replace('\n', '\n' + indent_b)
                 result += v
@@ -170,7 +169,7 @@ def get_directory_from_args(args):
 def scan_command(args):
     directory = get_directory_from_args(args)
     state = scan_path(directory)
-    print(state.__str__(color=True))
+    print(directory + ': ' + state.__str__(color=True))
 
 if __name__ == '__main__':
     import argparse
