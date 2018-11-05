@@ -13,9 +13,9 @@ def log(msg):
         print(msg)
 
 class Run:
-    def __init__(self, arg_list, stdin_text=None, raise_on_fail=False):
+    def __init__(self, arg_list, path=None, stdin_text=None, raise_on_fail=False):
         log('Running `' + ' '.join(arg_list) + '`')
-        p = subprocess.Popen(arg_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p = subprocess.Popen(arg_list, cwd=path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate(stdin_text)
         self.stdout = stdout.decode('utf-8') if stdout != None else ''
         self.stderr = stderr.decode('utf-8') if stderr != None else ''
@@ -38,10 +38,23 @@ class GitRepo:
     def __init__(self, base):
         assert os.path.isdir(os.path.join(base, '.git'))
         assert not os.path.islink(base)
-        log('Scanned Git repo at ' + base)
+        log('Scanning Git repo at ' + base + '...')
+        status_output = Run(['git', 'status'], path=base, raise_on_fail=True).stdout
+        remotes_output = Run(['git', 'remote', '-v'], path=base, raise_on_fail=True).stdout
+        self.working_tree_clean = bool(re.findall('nothing to commit, working tree clean', status_output))
+        self.has_remotes = bool(re.findall('[^\s]+\s+.+[$\n]', remotes_output))
+        self.synced_with_remote = bool(re.findall('Your branch is up to date with \'.*/.*\'\.', status_output))
+        log('... Scanned ' + base + ' done')
 
     def __str__(self):
-        return 'Git repo'
+        result = ['Git repo']
+        if not self.working_tree_clean:
+            result.append('Working tree dirty')
+        if not self.has_remotes:
+            result.append('No remotes')
+        if not self.synced_with_remote:
+            result.append('Not synced with remote')
+        return '\n'.join(result)
 
 class Link:
     def __init__(self, base):
@@ -78,16 +91,16 @@ class Directory:
             if i == len(items) - 1:
                 indent_a = ' └╴'
                 indent_b = '\n   '
+            result += indent_a + key
             v = str(val)
-            if not isinstance(val, Directory):
-                if v.find('\n') >= 0:
-                    indent_b += '  '
-                else:
-                    indent_b = ': '
             if v:
-                v = '\n' + v
+                if isinstance(val, Directory):
+                    v = '\n' + v
+                else:
+                    indent_b += '  '
+                    v = ': ' + v
                 v = v.replace('\n', indent_b)
-            result += indent_a + key + v
+                result += v
         return result
 
 class File:
