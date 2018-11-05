@@ -8,10 +8,13 @@ import json
 
 verbose = False
 
+def log(msg):
+    if verbose:
+        print(msg)
+
 class Run:
     def __init__(self, arg_list, stdin_text=None, raise_on_fail=False):
-        if verbose:
-            print('Running `' + ' '.join(arg_list) + '`')
+        log('Running `' + ' '.join(arg_list) + '`')
         p = subprocess.Popen(arg_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate(stdin_text)
         self.stdout = stdout.decode('utf-8') if stdout != None else ''
@@ -22,9 +25,26 @@ class Run:
                 '`' + ' '.join(arg_list) + '` exited with code ' + str(self.exit_code) + ':\n' +
                 self.stdout + '\n---\n' + self.stderr)
 
-def scan_directory(path):
-    print('I\'m supposed to be scanning \'' + path + '\', but I don\'t know how yet')
-    print('Btw, verbose printing is ' + ('on' if verbose else 'off'))
+def scan_git_repo(path):
+    return 'Repo'
+
+def scan_directory(base):
+    if os.path.isdir(os.path.join(base, '.git')):
+        log(base + ' is git repo, getting state')
+        return scan_git_repo(base)
+    else:
+        log('Scanning ' + base)
+        result = {}
+        for sub in os.listdir(base):
+            path = os.path.join(base, sub)
+            if os.path.isdir(path) and not sub.startswith('.'):
+                contents = scan_directory(path)
+                if contents:
+                    result[sub] = contents
+        if result:
+            return result
+        else:
+            return None
 
 def print_state(state):
     print(state)
@@ -55,8 +75,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.verbose:
-        verbose = True    
-    
+        verbose = True
+
     if not hasattr(args, 'func'):
         parser.print_help()
         exit(1)
@@ -65,4 +85,4 @@ if __name__ == '__main__':
         args.func(args)
     except RuntimeError as e:
         print('Error: ' + str(e))
-    
+
