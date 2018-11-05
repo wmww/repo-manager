@@ -25,29 +25,68 @@ class Run:
                 '`' + ' '.join(arg_list) + '` exited with code ' + str(self.exit_code) + ':\n' +
                 self.stdout + '\n---\n' + self.stderr)
 
-def scan_git_repo(path):
-    return 'Repo'
+class Repo:
+    def __init__(self, base):
+        log('Scanning repo at ' + base)
+        assert not os.path.islink(base)
+        assert os.path.isdir(base)
+        assert os.path.isdir(os.path.join(base, '.git'))
 
-def scan_directory(base):
-    if os.path.isdir(os.path.join(base, '.git')):
-        log(base + ' is git repo, getting state')
-        return scan_git_repo(base)
-    else:
-        log('Scanning ' + base)
-        result = {}
+    def __str__(self):
+        return 'Git repo'
+
+class Link:
+    def __init__(self, base):
+        log('Scanning link at ' + base)
+        base = os.path.normpath(base)
+        assert os.path.islink(base)
+        self.target = os.path.realpath(base)
+        assert self.target != base
+
+    def __str__(self):
+        return 'Link to ' + self.target
+
+class Directory:
+    def __init__(self, base):
+        log('Scanning directory at ' + base)
+        assert not os.path.islink(base)
+        assert os.path.isdir(base)
+        assert not os.path.isdir(os.path.join(base, '.git'))
+        self.contents = {}
         for sub in os.listdir(base):
-            path = os.path.join(base, sub)
-            if os.path.isdir(path) and not sub.startswith('.'):
-                contents = scan_directory(path)
-                if contents:
-                    result[sub] = contents
-        if result:
-            return result
-        else:
-            return None
+            if not sub.startswith('.'): # ignore hidden files
+                self.contents[sub] = scan_path(os.path.join(base, sub))
 
-def print_state(state):
-    print(state)
+    def __str__(self):
+        result = ''
+        for k, v in self.contents.items():
+            if result != '':
+                result += ',\n'
+            result += k + ' {\n' + str(v) + '\n}'
+        return result
+
+class File:
+    def __init__(self, base):
+        log('Scanning file at ' + base)
+        assert not os.path.islink(base)
+        assert os.path.isfile(base)
+
+    def __str__(self):
+        return 'File'
+
+def scan_path(base):
+    assert os.path.isabs(base)
+    if os.path.islink(base):
+        return Link(base)
+    elif os.path.isdir(base):
+        if os.path.isdir(os.path.join(base, '.git')):
+            return Repo(base)
+        else:
+            return Directory(base)
+    elif os.path.isfile(base):
+        return File(base)
+    else:
+        raise RuntimeError('Encountered unknown thing at ' + base)
 
 def get_directory_from_args(args):
     path = '.'
@@ -60,8 +99,8 @@ def get_directory_from_args(args):
 
 def scan_command(args):
     directory = get_directory_from_args(args)
-    state = scan_directory(directory)
-    print_state(state)
+    state = scan_path(directory)
+    print(state)
 
 if __name__ == '__main__':
     import argparse
@@ -84,5 +123,5 @@ if __name__ == '__main__':
     try:
         args.func(args)
     except RuntimeError as e:
-        print('Error: ' + str(e))
+        print('Error: ' + str(e), file=sys.stderr)
 
