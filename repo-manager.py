@@ -25,23 +25,31 @@ class Run:
                 '`' + ' '.join(arg_list) + '` exited with code ' + str(self.exit_code) + ':\n' +
                 self.stdout + '\n---\n' + self.stderr)
 
-class Repo:
+class MercurialRepo:
     def __init__(self, base):
-        log('Scanning repo at ' + base)
+        assert os.path.isdir(os.path.join(base, '.hg'))
         assert not os.path.islink(base)
-        assert os.path.isdir(base)
+        log('Scanned Mercurial repo at ' + base)
+
+    def __str__(self):
+        return 'Mercurial repo'
+
+class GitRepo:
+    def __init__(self, base):
         assert os.path.isdir(os.path.join(base, '.git'))
+        assert not os.path.islink(base)
+        log('Scanned Git repo at ' + base)
 
     def __str__(self):
         return 'Git repo'
 
 class Link:
     def __init__(self, base):
-        log('Scanning link at ' + base)
         base = os.path.normpath(base)
         assert os.path.islink(base)
         self.target = os.path.realpath(base)
         assert self.target != base
+        log('Scanned link at ' + base)
 
     def __str__(self):
         return 'Link to ' + self.target
@@ -51,11 +59,12 @@ class Directory:
         log('Scanning directory at ' + base)
         assert not os.path.islink(base)
         assert os.path.isdir(base)
-        assert not os.path.isdir(os.path.join(base, '.git'))
+        log('Scanning directory at ' + base + '...')
         self.contents = {}
         for sub in os.listdir(base):
             if not sub.startswith('.'): # ignore hidden files
                 self.contents[sub] = scan_path(os.path.join(base, sub))
+        log('... Scanning ' + base + ' done')
 
     def __str__(self):
         result = ''
@@ -63,19 +72,22 @@ class Directory:
         for i in range(len(items)):
             key, val = items[i]
             indent_a = ' ├╴'
-            indent_b = ' │ '
+            indent_b = '\n │ '
             if i != 0:
                 result += '\n'
             if i == len(items) - 1:
                 indent_a = ' └╴'
-                indent_b = '   '
+                indent_b = '\n   '
+            v = str(val)
             if not isinstance(val, Directory):
-                indent_b += '  '
-            val = str(val)
-            if val:
-                val = '\n' + val
-                val = val.replace('\n', '\n' + indent_b)
-            result += indent_a + key + val
+                if v.find('\n') >= 0:
+                    indent_b += '  '
+                else:
+                    indent_b = ': '
+            if v:
+                v = '\n' + v
+                v = v.replace('\n', indent_b)
+            result += indent_a + key + v
         return result
 
 class File:
@@ -88,7 +100,7 @@ class File:
         return 'File'
 
 def scan_path(base):
-    for i in [Link, Repo, Directory, File]:
+    for i in [Link, GitRepo, MercurialRepo, Directory, File]:
         try:
             return i(base)
         except AssertionError:
