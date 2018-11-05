@@ -25,14 +25,23 @@ class Run:
                 '`' + ' '.join(arg_list) + '` exited with code ' + str(self.exit_code) + ':\n' +
                 self.stdout + '\n---\n' + self.stderr)
 
+def style(s):
+    if s:
+        return '\x1b[' + s + 'm'
+    else:
+        return '\x1b[0m'
+
 class MercurialRepo:
     def __init__(self, base):
         assert os.path.isdir(os.path.join(base, '.hg'))
         assert not os.path.islink(base)
         log('Scanned Mercurial repo at ' + base)
 
-    def __str__(self):
-        return 'Mercurial repo'
+    def __str__(self, color=False):
+        result = 'Mercurial repo'
+        if color:
+            result = style('1;35') + result + style(None)
+        return result
 
 class GitRepo:
     def __init__(self, base):
@@ -46,14 +55,26 @@ class GitRepo:
         self.synced_with_remote = bool(re.findall('Your branch is up to date with \'.*/.*\'\.', status_output))
         log('... Scanned ' + base + ' done')
 
-    def __str__(self):
-        result = ['Git repo']
+    def __str__(self, color=False):
+        result = []
+        warn = False
         if not self.working_tree_clean:
             result.append('Working tree dirty')
+            warn = True
         if not self.has_remotes:
             result.append('No remotes')
+            warn = True
         if not self.synced_with_remote:
             result.append('Not synced with remote')
+            warn = True
+        if warn:
+            result = ['Git repo'] + result
+        else:
+            result = ['Clean Git repo'] + result
+        if color:
+            s = style('1;31') if warn else style('1;32')
+            for i in range(len(result)):
+                result[i] = s + result[i] + style(None)
         return '\n'.join(result)
 
 class Link:
@@ -64,8 +85,11 @@ class Link:
         assert self.target != base
         log('Scanned link at ' + base)
 
-    def __str__(self):
-        return 'Link to ' + self.target
+    def __str__(self, color=False):
+        result = 'Link to ' + self.target
+        if color:
+            result = style('1;36') + result + style(None)
+        return result
 
 class Directory:
     def __init__(self, base):
@@ -79,27 +103,30 @@ class Directory:
                 self.contents[sub] = scan_path(os.path.join(base, sub))
         log('... Scanning ' + base + ' done')
 
-    def __str__(self):
+    def __str__(self, color=False):
         result = ''
         items = list(self.contents.items())
         for i in range(len(items)):
             key, val = items[i]
             indent_a = ' ├╴'
-            indent_b = '\n │ '
+            indent_b = ' │ '
             if i != 0:
                 result += '\n'
             if i == len(items) - 1:
                 indent_a = ' └╴'
-                indent_b = '\n   '
+                indent_b = '   '
+            if color:
+                indent_a = style('37') + indent_a + style(None)
+                indent_b = style('37') + indent_b + style(None)
             result += indent_a + key
-            v = str(val)
+            v = val.__str__(color=color)
             if v:
                 if isinstance(val, Directory):
                     v = '\n' + v
                 else:
                     indent_b += '  '
                     v = ': ' + v
-                v = v.replace('\n', indent_b)
+                v = v.replace('\n', '\n' + indent_b)
                 result += v
         return result
 
@@ -109,8 +136,11 @@ class File:
         assert not os.path.islink(base)
         assert os.path.isfile(base)
 
-    def __str__(self):
-        return 'File'
+    def __str__(self, color=False):
+        result = 'File'
+        if color:
+            result = style('1;34') + result + style(None)
+        return result
 
 def scan_path(base):
     for i in [Link, GitRepo, MercurialRepo, Directory, File]:
@@ -132,7 +162,7 @@ def get_directory_from_args(args):
 def scan_command(args):
     directory = get_directory_from_args(args)
     state = scan_path(directory)
-    print(state)
+    print(state.__str__(color=True))
 
 if __name__ == '__main__':
     import argparse
