@@ -98,13 +98,24 @@ class Directory:
         assert os.path.isdir(base)
         log('Scanning directory at ' + base + '...')
         self.contents = {}
+        self.contains_git_repo = False
         for sub in os.listdir(base):
             if not sub.startswith('.'): # ignore hidden files
-                self.contents[sub] = scan_path(os.path.join(base, sub))
+                 scanned = scan_path(os.path.join(base, sub))
+                 if (isinstance(scanned, GitRepo) or
+                        (isinstance(scanned, Directory) and
+                        scanned.contains_git_repo)):
+                    self.contains_git_repo = True
+                 self.contents[sub] = scanned
         log('... Scanning ' + base + ' done')
 
     def __str__(self, color=False):
-        result = ''
+        if not self.contains_git_repo:
+            result = 'Directory without git repos'
+            if color:
+                result = style('1;34') + result + style(None)
+            return result
+        result = '\n'
         items = list(self.contents.items())
         for i in range(len(items)):
             key, val = items[i]
@@ -121,11 +132,8 @@ class Directory:
             result += indent_a + key
             v = val.__str__(color=color)
             if v:
-                if isinstance(val, Directory):
-                    v = '\n' + v
-                else:
-                    indent_b += '  '
-                    v = ': ' + v
+                indent_b += '  '
+                v = ': ' + v
                 v = v.replace('\n', '\n' + indent_b)
                 result += v
         return result
