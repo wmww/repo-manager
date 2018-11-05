@@ -169,12 +169,14 @@ def get_directory_from_args(args):
 def scan_command(args):
     directory = get_directory_from_args(args)
     state = scan_path(directory)
-    print(directory + ': ' + state.__str__(color=True))
+    color = not args.no_color
+    print(directory + ': ' + state.__str__(color=color))
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Manage a directory containing git repos')
     parser.add_argument('-v', '--verbose', action='store_true', help='verbose output')
+    parser.add_argument('--no-color', action='store_true', help='disable colored output')
     subparsers = parser.add_subparsers()
 
     subparser = subparsers.add_parser('scan', help='Scan a directory and show the results')
