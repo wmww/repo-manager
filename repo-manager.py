@@ -59,10 +59,23 @@ class Directory:
 
     def __str__(self):
         result = ''
-        for k, v in self.contents.items():
-            if result != '':
-                result += ',\n'
-            result += k + ' {\n' + str(v) + '\n}'
+        items = list(self.contents.items())
+        for i in range(len(items)):
+            key, val = items[i]
+            indent_a = ' ├╴'
+            indent_b = ' │ '
+            if i != 0:
+                result += '\n'
+            if i == len(items) - 1:
+                indent_a = ' └╴'
+                indent_b = '   '
+            if not isinstance(val, Directory):
+                indent_b += '  '
+            val = str(val)
+            if val:
+                val = '\n' + val
+                val = val.replace('\n', '\n' + indent_b)
+            result += indent_a + key + val
         return result
 
 class File:
@@ -75,18 +88,12 @@ class File:
         return 'File'
 
 def scan_path(base):
-    assert os.path.isabs(base)
-    if os.path.islink(base):
-        return Link(base)
-    elif os.path.isdir(base):
-        if os.path.isdir(os.path.join(base, '.git')):
-            return Repo(base)
-        else:
-            return Directory(base)
-    elif os.path.isfile(base):
-        return File(base)
-    else:
-        raise RuntimeError('Encountered unknown thing at ' + base)
+    for i in [Link, Repo, Directory, File]:
+        try:
+            return i(base)
+        except AssertionError:
+            pass
+    raise RuntimeError('Failed to scan ' + base)
 
 def get_directory_from_args(args):
     path = '.'
