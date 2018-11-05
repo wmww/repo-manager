@@ -31,6 +31,12 @@ def style(s):
     else:
         return '\x1b[0m'
 
+def style_if(txt, s, cond):
+    if cond:
+        return style(s) + txt + style(None)
+    else:
+        return txt
+
 class MercurialRepo:
     def __init__(self, base):
         assert os.path.isdir(os.path.join(base, '.hg'))
@@ -38,10 +44,7 @@ class MercurialRepo:
         log('Scanned Mercurial repo at ' + base)
 
     def __str__(self, color=False):
-        result = 'Mercurial repo'
-        if color:
-            result = style('1;35') + result + style(None)
-        return result
+        return style_if('Mercurial repo', '1;35', color)
 
 class GitRepo:
     def __init__(self, base):
@@ -86,10 +89,7 @@ class Link:
         log('Scanned link at ' + base)
 
     def __str__(self, color=False):
-        result = 'Link to ' + self.target
-        if color:
-            result = style('1;36') + result + style(None)
-        return result
+        return style_if('Link to ' + self.target, '1;36', color)
 
 class Directory:
     def __init__(self, base):
@@ -115,6 +115,7 @@ class Directory:
             if color:
                 result = style('1;34') + result + style(None)
             return result
+        # Directories with contents always start with a newline
         result = '\n'
         items = list(self.contents.items())
         for i in range(len(items)):
@@ -124,17 +125,24 @@ class Directory:
             if i != 0:
                 result += '\n'
             if i == len(items) - 1:
-                indent_a = ' └╴'
+                indent_a = ' ╰╴'
                 indent_b = '   '
-            if color:
-                indent_a = style('37') + indent_a + style(None)
-                indent_b = style('37') + indent_b + style(None)
-            result += indent_a + key
+            indent_b = style_if(indent_b, '37', color)
             v = val.__str__(color=color)
-            if v:
-                v = ': ' + v
-                v = v.replace('\n', '\n' + indent_b)
-                result += v
+            if isinstance(val, Directory):
+                v = ': ' + v.replace('\n', '\n' + indent_b)
+            else:
+                indent_b += ' ' * len(key)
+                if v.find('\n') == -1:
+                    v = ': ' + v
+                elif len(v) > 1:
+                    v = v.split('\n')
+                    v = ('\n' + indent_b).join(
+                        [style_if('⎧ ' + v[0],  '0', color)] +
+                        [style_if('⎪ ' + i,     '0', color) for i in v[1:-1]] +
+                        [style_if('⎩ ' + v[-1], '0', color)])
+            indent_a = style_if(indent_a, '37', color)
+            result += indent_a + key + v
         return result
 
 class File:
@@ -144,10 +152,7 @@ class File:
         assert os.path.isfile(base)
 
     def __str__(self, color=False):
-        result = 'File'
-        if color:
-            result = style('1;34') + result + style(None)
-        return result
+        return style_if('File', '1;34', color)
 
 def scan_path(base):
     for i in [Link, GitRepo, MercurialRepo, Directory, File]:
