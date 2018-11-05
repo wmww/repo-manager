@@ -30,10 +30,13 @@ def print_state(state):
     print(state)
 
 def get_directory_from_args(args):
-    if args.directory == None:
-        return '.'
-    else:
-        return args.directory
+    path = '.'
+    if args.directory:
+        path = args.directory
+    path = os.path.abspath(path)
+    if not os.path.isdir(path):
+        raise RuntimeError(path + ' is not a directory')
+    return path;
 
 def scan_command(args):
     directory = get_directory_from_args(args)
@@ -58,5 +61,8 @@ if __name__ == '__main__':
         parser.print_help()
         exit(1)
 
-    args.func(args)
+    try:
+        args.func(args)
+    except RuntimeError as e:
+        print('Error: ' + str(e))
     
