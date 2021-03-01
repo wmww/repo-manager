@@ -72,7 +72,7 @@ class GitRepo:
         log('... Scanned ' + base + ' done')
 
     def is_problem(self):
-        return self.working_tree_clean or not self.has_remotes or not self.synced_with_remote
+        return not self.working_tree_clean or not self.has_remotes or not self.synced_with_remote
 
     def __str__(self, color=False):
         result = []
