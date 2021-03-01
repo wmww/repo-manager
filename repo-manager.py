@@ -12,6 +12,13 @@ def log(msg):
     if verbose:
         print(msg)
 
+class Context:
+    def __init__(self):
+        self.git_repos = 0
+        self.mercurial_repos = 0
+        self.clean_repos = 0
+        self.problem_repos = 0
+
 class Run:
     def __init__(self, arg_list, path=None, stdin_text=None, raise_on_fail=False):
         log('Running `' + ' '.join(arg_list) + '`')
@@ -38,16 +45,17 @@ def style_if(txt, s, cond):
         return txt
 
 class MercurialRepo:
-    def __init__(self, base):
+    def __init__(self, base, ctx):
         assert os.path.isdir(os.path.join(base, '.hg'))
         assert not os.path.islink(base)
+        ctx.mercurial_repos += 1
         log('Scanned Mercurial repo at ' + base)
 
     def __str__(self, color=False):
         return style_if('Mercurial repo', '1;35', color)
 
 class GitRepo:
-    def __init__(self, base):
+    def __init__(self, base, ctx):
         assert os.path.isdir(os.path.join(base, '.git'))
         assert not os.path.islink(base)
         log('Scanning Git repo at ' + base + '...')
@@ -56,32 +64,36 @@ class GitRepo:
         self.working_tree_clean = bool(re.findall('nothing to commit, working tree clean', status_output))
         self.has_remotes = bool(re.findall('[^\s]+\s+.+[$\n]', remotes_output))
         self.synced_with_remote = bool(re.findall('Your branch is up to date with \'.*/.*\'\.', status_output))
+        ctx.git_repos += 1
+        if self.is_problem():
+            ctx.problem_repos += 1
+        else:
+            ctx.clean_repos += 1
         log('... Scanned ' + base + ' done')
+
+    def is_problem(self):
+        return self.working_tree_clean or not self.has_remotes or not self.synced_with_remote
 
     def __str__(self, color=False):
         result = []
-        warn = False
         if not self.working_tree_clean:
             result.append('Working tree dirty')
-            warn = True
         if not self.has_remotes:
             result.append('No remotes')
-            warn = True
         if not self.synced_with_remote:
             result.append('Not synced with remote')
-            warn = True
-        if warn:
+        if self.is_problem():
             result = ['Git repo'] + result
         else:
             result = ['Clean Git repo'] + result
         if color:
-            s = style('1;31') if warn else style('1;32')
+            s = style('1;31') if self.is_problem() else style('1;32')
             for i in range(len(result)):
                 result[i] = s + result[i] + style(None)
         return '\n'.join(result)
 
 class Link:
-    def __init__(self, base):
+    def __init__(self, base, ctx):
         base = os.path.normpath(base)
         assert os.path.islink(base)
         self.target = os.path.realpath(base)
@@ -92,7 +104,7 @@ class Link:
         return style_if('Link to ' + self.target, '1;36', color)
 
 class Directory:
-    def __init__(self, base):
+    def __init__(self, base, ctx):
         log('Scanning directory at ' + base)
         assert not os.path.islink(base)
         assert os.path.isdir(base)
@@ -101,7 +113,7 @@ class Directory:
         self.contains_git_repo = False
         for sub in os.listdir(base):
             if not sub.startswith('.'): # ignore hidden files
-                 scanned = scan_path(os.path.join(base, sub))
+                 scanned = scan_path(os.path.join(base, sub), ctx)
                  if (isinstance(scanned, GitRepo) or
                         (isinstance(scanned, Directory) and
                         scanned.contains_git_repo)):
@@ -146,7 +158,7 @@ class Directory:
         return result
 
 class File:
-    def __init__(self, base):
+    def __init__(self, base, ctx):
         log('Scanning file at ' + base)
         assert not os.path.islink(base)
         assert os.path.isfile(base)
@@ -154,10 +166,10 @@ class File:
     def __str__(self, color=False):
         return style_if('File', '1;34', color)
 
-def scan_path(base):
+def scan_path(base, ctx):
     for i in [Link, GitRepo, MercurialRepo, Directory, File]:
         try:
-            return i(base)
+            return i(base, ctx)
         except AssertionError:
             pass
     raise RuntimeError('Failed to scan ' + base)
@@ -173,9 +185,16 @@ def get_directory_from_args(args):
 
 def scan_command(args):
     directory = get_directory_from_args(args)
-    state = scan_path(directory)
+    ctx = Context()
+    state = scan_path(directory, ctx)
     color = not args.no_color
     print(directory + ': ' + state.__str__(color=color))
+    print()
+    print(style_if(str(ctx.clean_repos), '1;32', color) + ' clean repos, ', end='')
+    if ctx.problem_repos:
+        print(style_if(str(ctx.problem_repos), '1;31', color) + ' dirty repos')
+    else:
+        print(style_if('No dirty repos', '1;32', color))
 
 if __name__ == '__main__':
     import argparse
