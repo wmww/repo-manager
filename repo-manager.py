@@ -64,6 +64,12 @@ class GitRepo:
         self.working_tree_clean = bool(re.findall('nothing to commit, working tree clean', status_output))
         self.has_remotes = bool(re.findall('[^\s]+\s+.+[$\n]', remotes_output))
         self.synced_with_remote = bool(re.findall('Your branch is up to date with \'.*/.*\'\.', status_output))
+        if self.working_tree_clean and self.has_remotes and not self.synced_with_remote:
+            log('Checking if last commit is on remote')
+            last_commit = Run(['git', 'rev-parse', 'HEAD'], path=base, raise_on_fail=True).stdout.strip()
+            remotes_with_last_commit_result = Run(['git', 'branch', '-r', '--contains', last_commit], path=base, raise_on_fail=False);
+            if remotes_with_last_commit_result.exit_code == 0 and remotes_with_last_commit_result.stdout.strip() != '':
+                self.synced_with_remote = True
         ctx.git_repos += 1
         if self.is_problem():
             ctx.problem_repos += 1
