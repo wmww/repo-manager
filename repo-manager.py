@@ -205,7 +205,7 @@ if __name__ == '__main__':
 
     subparser = subparsers.add_parser('scan', help='Scan a directory and show the results')
     subparser.set_defaults(func=scan_command)
-    subparser.add_argument('-d', '--directory', type=str, help='directory to scan, default is current directory')
+    subparser.add_argument('directory', nargs='?', type=str, help='directory to scan, default is current directory')
     args = parser.parse_args()
 
     if args.verbose:
