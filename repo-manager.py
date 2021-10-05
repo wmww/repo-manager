@@ -5,10 +5,11 @@ import os
 import subprocess
 import re
 import json
+from typing import Optional
 
 verbose = False
 
-def log(msg):
+def log(msg: str):
     if verbose:
         print(msg)
 
@@ -20,10 +21,14 @@ class Context:
         self.problem_repos = 0
 
 class Run:
-    def __init__(self, arg_list, path=None, stdin_text=None, raise_on_fail=False):
+    def __init__(self,
+        arg_list: list[str],
+        path: Optional[str] = None,
+        raise_on_fail=False
+    ):
         log('Running `' + ' '.join(arg_list) + '`')
         p = subprocess.Popen(arg_list, cwd=path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = p.communicate(stdin_text)
+        stdout, stderr = p.communicate(None)
         self.stdout = stdout.decode('utf-8') if stdout != None else ''
         self.stderr = stderr.decode('utf-8') if stderr != None else ''
         self.exit_code = p.returncode
@@ -32,30 +37,30 @@ class Run:
                 '`' + ' '.join(arg_list) + '` exited with code ' + str(self.exit_code) + ':\n' +
                 self.stdout + '\n---\n' + self.stderr)
 
-def style(s):
+def style(s: Optional[str]) -> str:
     if s:
         return '\x1b[' + s + 'm'
     else:
         return '\x1b[0m'
 
-def style_if(txt, s, cond):
+def style_if(txt: str, s: str, cond: bool) -> str:
     if cond:
         return style(s) + txt + style(None)
     else:
         return txt
 
 class MercurialRepo:
-    def __init__(self, base, ctx):
+    def __init__(self, base: str, ctx: Context):
         assert os.path.isdir(os.path.join(base, '.hg'))
         assert not os.path.islink(base)
         ctx.mercurial_repos += 1
         log('Scanned Mercurial repo at ' + base)
 
-    def __str__(self, color=False):
+    def __str__(self, color: bool = False):
         return style_if('Mercurial repo', '1;35', color)
 
 class GitRepo:
-    def __init__(self, base, ctx):
+    def __init__(self, base: str, ctx: Context):
         assert os.path.isdir(os.path.join(base, '.git'))
         assert not os.path.islink(base)
         log('Scanning Git repo at ' + base + '...')
@@ -77,10 +82,10 @@ class GitRepo:
             ctx.clean_repos += 1
         log('... Scanned ' + base + ' done')
 
-    def is_problem(self):
+    def is_problem(self) -> bool:
         return not self.working_tree_clean or not self.has_remotes or not self.synced_with_remote
 
-    def __str__(self, color=False):
+    def __str__(self, color=False) -> str:
         result = []
         if not self.working_tree_clean:
             result.append('Working tree dirty')
@@ -99,18 +104,18 @@ class GitRepo:
         return '\n'.join(result)
 
 class Link:
-    def __init__(self, base, ctx):
+    def __init__(self, base: str, ctx: Context):
         base = os.path.normpath(base)
         assert os.path.islink(base)
         self.target = os.path.realpath(base)
         assert self.target != base
         log('Scanned link at ' + base)
 
-    def __str__(self, color=False):
+    def __str__(self, color=False) -> str:
         return style_if('Link to ' + self.target, '1;36', color)
 
 class Directory:
-    def __init__(self, base, ctx):
+    def __init__(self, base: str, ctx: Context):
         log('Scanning directory at ' + base)
         assert not os.path.islink(base)
         assert os.path.isdir(base)
@@ -127,7 +132,7 @@ class Directory:
                  self.contents[sub] = scanned
         log('... Scanning ' + base + ' done')
 
-    def __str__(self, color=False):
+    def __str__(self, color=False) -> str:
         if not self.contains_git_repo:
             result = 'Directory without git repos'
             if color:
@@ -164,15 +169,15 @@ class Directory:
         return result
 
 class File:
-    def __init__(self, base, ctx):
+    def __init__(self, base: str, ctx: Context):
         log('Scanning file at ' + base)
         assert not os.path.islink(base)
         assert os.path.isfile(base)
 
-    def __str__(self, color=False):
+    def __str__(self, color=False) -> str:
         return style_if('File', '1;34', color)
 
-def scan_path(base, ctx):
+def scan_path(base: str, ctx: Context):
     for i in [Link, GitRepo, MercurialRepo, Directory, File]:
         try:
             return i(base, ctx)
@@ -180,7 +185,7 @@ def scan_path(base, ctx):
             pass
     raise RuntimeError('Failed to scan ' + base)
 
-def get_directory_from_args(args):
+def get_directory_from_args(args) -> str:
     path = '.'
     if args.directory:
         path = args.directory
@@ -189,7 +194,7 @@ def get_directory_from_args(args):
         raise RuntimeError(path + ' is not a directory')
     return path;
 
-def scan_command(args):
+def scan_command(args) -> None:
     directory = get_directory_from_args(args)
     ctx = Context()
     state = scan_path(directory, ctx)
