@@ -24,10 +24,12 @@ class Run:
     def __init__(self,
         arg_list: list[str],
         path: Optional[str] = None,
+        passthrough=False,
         raise_on_fail=False
     ):
         log('Running `' + ' '.join(arg_list) + '`')
-        p = subprocess.Popen(arg_list, cwd=path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        io = None if passthrough else subprocess.PIPE
+        p = subprocess.Popen(arg_list, cwd=path, stdout=io, stderr=io)
         stdout, stderr = p.communicate(None)
         self.stdout = stdout.decode('utf-8') if stdout != None else ''
         self.stderr = stderr.decode('utf-8') if stderr != None else ''
@@ -66,10 +68,12 @@ class GitRepo:
         log('Scanning Git repo at ' + base + '...')
         status_output = Run(['git', 'status'], path=base, raise_on_fail=True).stdout
         remotes_output = Run(['git', 'remote', '-v'], path=base, raise_on_fail=True).stdout
-        self.working_tree_clean = bool(re.findall('nothing to commit, working tree clean', status_output))
-        self.has_remotes = bool(re.findall('[^\s]+\s+.+[$\n]', remotes_output))
-        self.synced_with_remote = bool(re.findall('Your branch is up to date with \'.*/.*\'\.', status_output))
-        if self.working_tree_clean and self.has_remotes and not self.synced_with_remote:
+        self.working_tree_clean = bool(re.findall(r'nothing to commit, working tree clean', status_output))
+        self.remotes = {}
+        for match in re.finditer(r'([^\s]+)\s+([^\s]+).*[$\n]', remotes_output):
+            self.remotes[match.group(1)] = match.group(2)
+        self.synced_with_remote = bool(re.findall(r'Your branch is up to date with \'.*/.*\'\.', status_output))
+        if self.working_tree_clean and self.remotes and not self.synced_with_remote:
             log('Checking if last commit is on remote')
             last_commit = Run(['git', 'rev-parse', 'HEAD'], path=base, raise_on_fail=True).stdout.strip()
             remotes_with_last_commit_result = Run(['git', 'branch', '-r', '--contains', last_commit], path=base, raise_on_fail=False);
@@ -83,13 +87,13 @@ class GitRepo:
         log('... Scanned ' + base + ' done')
 
     def is_problem(self) -> bool:
-        return not self.working_tree_clean or not self.has_remotes or not self.synced_with_remote
+        return not self.working_tree_clean or not self.remotes or not self.synced_with_remote
 
     def __str__(self, color=False) -> str:
         result = []
         if not self.working_tree_clean:
             result.append('Working tree dirty')
-        if not self.has_remotes:
+        if not self.remotes:
             result.append('No remotes')
         if not self.synced_with_remote:
             result.append('Not synced with remote')
@@ -185,17 +189,17 @@ def scan_path(base: str, ctx: Context):
             pass
     raise RuntimeError('Failed to scan ' + base)
 
-def get_directory_from_args(args) -> str:
+def get_directory_from_args(args, name: str) -> str:
     path = '.'
-    if args.directory:
-        path = args.directory
+    if hasattr(args, name) and getattr(args, name) is not None:
+        path = getattr(args, name)
     path = os.path.abspath(path)
     if not os.path.isdir(path):
         raise RuntimeError(path + ' is not a directory')
     return path;
 
 def scan_command(args) -> None:
-    directory = get_directory_from_args(args)
+    directory = get_directory_from_args(args, 'directory')
     ctx = Context()
     state = scan_path(directory, ctx)
     color = not args.no_color
@@ -207,6 +211,79 @@ def scan_command(args) -> None:
     else:
         print(style_if('No dirty repos', '1;32', color))
 
+def setup_repo_with_remotes(repo_dir: str, remotes: dict[str, str]):
+    preexisting = os.path.exists(repo_dir)
+    if not preexisting:
+        parent = os.path.dirname(repo_dir)
+        assert os.path.exists(parent), parent + ' does not exist'
+        remote_url = remotes.get('origin', list(remotes.values())[0])
+        log('Cloning ' + remote_url + ' into ' + repo_dir)
+        Run(['git', 'clone', remote_url, repo_dir], passthrough=True, raise_on_fail=True)
+    parsed = GitRepo(repo_dir, Context())
+    if preexisting and not parsed.is_problem():
+        Run(['git', 'pull'], passthrough=True, raise_on_fail=False)
+    for name, url in remotes.items():
+        if name not in parsed.remotes or url != parsed.remotes[name]:
+            if name in parsed.remotes:
+                log('Need to remove remote ' + name + ' with url ' + parsed.remotes[name] + ' so it can be replaced with ' + url)
+                Run(['git', 'remote', 'remove', name], path=repo_dir, raise_on_fail=True)
+            Run(['git', 'remote', 'add', name, url], path=repo_dir, raise_on_fail=True)
+        else:
+            log(repo_dir + ' already has remote ' + name + ' with url ' + url)
+    log(repo_dir + ' has been set up with ' + str(len(remotes.items())) + ' remotes')
+
+def setup_repo_exclude(repo_dir: str, exclude: list[str]):
+    path = os.path.join(repo_dir, '.git', 'info', 'exclude')
+    with open(path, 'r') as f:
+        original = f.read()
+    section_start = '# <repo-manager>'
+    section_end = '# </repo-manager>'
+    sections = re.split(re.escape(section_start) + r'.*?' + re.escape(section_end), original, flags=re.DOTALL)
+    to_add = '\n'.join([section_start] + exclude + [section_end])
+    sections.insert(1, to_add)
+    if len(sections) <= 2:
+        while not sections[0].endswith('\n\n'):
+            sections[0] += '\n'
+    result = ''.join(sections)
+    if not result.endswith('\n'):
+        result += '\n'
+    if result != original:
+        log('Exclude file updated')
+        with open(path, 'w') as f:
+            f.write(result)
+    else:
+        log('Exclude file unchanged')
+
+def setup_command(args) -> None:
+    config_dir = get_directory_from_args(args, 'directory')
+    target_dir = get_directory_from_args(args, 'target')
+    if os.path.exists(os.path.join(target_dir, '.git')):
+        raise RuntimeError(target_dir + ' is a git directory, perhaps you meant ' + os.path.dirname(target_dir) + '?')
+    repo_name = os.path.basename(config_dir)
+    repo_dir = os.path.join(target_dir, repo_name)
+    assert repo_name
+    repo_json_path = os.path.join(config_dir, 'repo.json')
+    log('Loading config from ' + repo_json_path)
+    with open(repo_json_path, 'r') as f:
+        try:
+            config = json.load(f)
+        except json.decoder.JSONDecodeError as e:
+            raise RuntimeError('Failed to parse ' + repo_json_path + ': ' + str(e))
+    remotes = config['remotes']
+    del config['remotes']
+    exclude = config['exclude']
+    del config['exclude']
+    color = not args.no_color
+    if config:
+        raise RuntimeError(style_if(
+            'Unknown key(s) in ' + repo_json_path + ': ' + ', '.join(config.keys()),
+            '1;31',
+            color
+        ))
+    setup_repo_with_remotes(repo_dir, remotes)
+    setup_repo_exclude(repo_dir, exclude)
+    print(style_if(repo_dir + ' set up successfully', '1;32', color))
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Manage a directory containing git repos')
@@ -217,6 +294,12 @@ if __name__ == '__main__':
     subparser = subparsers.add_parser('scan', help='Scan a directory and show the results')
     subparser.set_defaults(func=scan_command)
     subparser.add_argument('directory', nargs='?', type=str, help='directory to scan, default is current directory')
+
+    subparser = subparsers.add_parser('setup', help='Clone or set up a repo from configuration (see repo-json.md)')
+    subparser.set_defaults(func=setup_command)
+    subparser.add_argument('directory', type=str, help='configuration directory that contains the repo.json file')
+    subparser.add_argument('target', nargs='?', type=str, help='parent directory of the repo to set up, default is current directory')
+
     args = parser.parse_args()
 
     if args.verbose:
