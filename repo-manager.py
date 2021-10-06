@@ -254,6 +254,35 @@ def setup_repo_exclude(repo_dir: str, exclude: list[str]):
     else:
         log('Exclude file unchanged')
 
+def create_symlink(target: str, link: str):
+    target = os.path.abspath(target)
+    if os.path.exists(link):
+        if os.path.islink(link):
+            if os.path.abspath(os.readlink(link)) == target:
+                log('Leaving ' + link + ' unchanged')
+                return
+            else:
+                log('Removing old link from ' + link + ' to ' + os.readlink(link))
+                os.remove(link)
+        else:
+            raise RuntimeError(link + ' already exists and is not a symlink')
+    log('Linking ' + link + ' to ' + target)
+    os.symlink(target, link)
+
+def symlink_all(target_dir: str, link_dir: str):
+    for item in os.listdir(target_dir):
+        if not item.startswith('.'):
+            create_symlink(os.path.join(target_dir, item), os.path.join(link_dir, item))
+
+def remove_dead_symlinks(link_dir: str):
+    for item in os.listdir(link_dir):
+        item_path = os.path.join(link_dir, item)
+        if os.path.islink(item_path):
+            target = os.readlink(item_path)
+            if not os.path.exists(target):
+                log('Removing broken symlink ' + item_path + ' (was pointing to ' + target + ')')
+                os.remove(item_path)
+
 def setup_command(args) -> None:
     config_dir = get_directory_from_args(args, 'directory')
     target_dir = get_directory_from_args(args, 'target')
@@ -282,6 +311,8 @@ def setup_command(args) -> None:
         ))
     setup_repo_with_remotes(repo_dir, remotes)
     setup_repo_exclude(repo_dir, exclude)
+    symlink_all(config_dir, repo_dir)
+    remove_dead_symlinks(repo_dir)
     print(style_if(repo_dir + ' set up successfully', '1;32', color))
 
 if __name__ == '__main__':
