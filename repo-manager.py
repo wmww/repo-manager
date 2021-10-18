@@ -1,5 +1,9 @@
 #!/usr/bin/python3
 
+# TODO: use standard logging
+# TODO: better color management
+# TODO: split into multiple files
+
 import sys
 import os
 import subprocess
@@ -8,10 +12,14 @@ import json
 from typing import Optional, Any
 
 verbose = False
+default_config_path = '~/.config/repo-manager'
 
 def log(msg: str):
     if verbose:
         print(msg)
+
+def log_warning(msg: str):
+    print('Warning: ' + msg)
 
 class Context:
     def __init__(self):
@@ -220,8 +228,20 @@ def setup_repo_with_remotes(repo_dir: str, remotes: dict[str, str]):
         log('Cloning ' + remote_url + ' into ' + repo_dir)
         Run(['git', 'clone', remote_url, repo_dir], passthrough=True, raise_on_fail=True)
     parsed = GitRepo(repo_dir, Context())
-    if preexisting and not parsed.is_problem():
-        Run(['git', 'pull'], passthrough=True, raise_on_fail=False)
+    found_match = False
+    for repo_name, repo_url in parsed.remotes.items():
+        for requested_name, requested_url in remotes.items():
+            if repo_url == requested_url:
+                found_match = True
+                break
+        if found_match:
+            break
+    if not found_match:
+        raise RuntimeError(
+            'None of the remotes in existing repo ' +
+            repo_dir +
+            ' match match any of the specified remotes: ' +
+            ' '.join(remotes.values()))
     for name, url in remotes.items():
         if name not in parsed.remotes or url != parsed.remotes[name]:
             if name in parsed.remotes:
@@ -230,6 +250,8 @@ def setup_repo_with_remotes(repo_dir: str, remotes: dict[str, str]):
             Run(['git', 'remote', 'add', name, url], path=repo_dir, raise_on_fail=True)
         else:
             log(repo_dir + ' already has remote ' + name + ' with url ' + url)
+    if preexisting and not parsed.is_problem():
+        Run(['git', 'pull'], passthrough=True, raise_on_fail=False)
     log(repo_dir + ' has been set up with ' + str(len(remotes.items())) + ' remotes')
 
 def setup_repo_exclude(repo_dir: str, exclude: list[str]):
@@ -293,8 +315,9 @@ def assert_type(value: Any, expected_type: Any, value_name: str):
         str(value_name) + ' is type ' + str(type(value)) + ' instead of ' + str(expected_type)
     )
 
-class JsonConfig:
-    def __init__(self, config: Any):
+class RepoConfig:
+    def __init__(self, config_dir: Optional[str], config: Any):
+        self.symlink_dir = config_dir
         self.remotes: dict[str, str] = config.pop('remotes', None)
         assert_type(self.remotes, dict, 'remotes')
         for k, v in self.remotes.items():
@@ -304,28 +327,82 @@ class JsonConfig:
         assert_type(self.exclude, list, 'exclude')
         for i, line in enumerate(self.exclude):
             assert_type(line, str, 'exclude line ' + str(i + 1))
-        if config:
-            raise RuntimeError('unknown key(s): ' + ', '.join(config.keys()))
+        self.name: str = config.pop('name', os.path.basename(config_dir) if config_dir else None)
+        assert self.name, 'name must be specified'
+        assert_type(self.name, str, 'name')
+        config.pop('//', None)
+        assert not config, 'unknown key(s): ' + ', '.join(config.keys())
+
+class ConfigDb:
+    def __init__(self) -> None:
+        self.repos: dict[str, RepoConfig] = {}
+
+    def add_repo(self, config: RepoConfig):
+        assert config.name not in self.repos, 'loaded multiple ' + config.name + ' repos'
+        self.repos[config.name] = config
+
+    def load_repo_json(self, path: str):
+        log('Loading config from ' + path)
+        try:
+            with open(path, 'r') as f:
+                config = RepoConfig(os.path.dirname(path), json.load(f))
+                self.add_repo(config)
+        except (json.decoder.JSONDecodeError, AssertionError) as e:
+            log_warning('failed to load ' + path + ': ' + str(e))
+
+    def load_repo_list_json(self, path: str):
+        log('Loading config from ' + path)
+        try:
+            with open(path, 'r') as f:
+                repos = json.load(f)
+                assert_type(repos, list, 'repo list')
+                for i, repo in enumerate(repos):
+                    try:
+                        config = RepoConfig(None, repo)
+                        self.add_repo(config)
+                    except AssertionError as e:
+                        log_warning('failed to repo ' + str(i) + ' from ' + path + ': ' + str(e))
+        except (json.decoder.JSONDecodeError, AssertionError) as e:
+            log_warning('failed to load ' + path + ': ' + str(e))
+
+    def load_dir(self, path: str):
+        log('Loading config from ' + path)
+        repo_json_path = os.path.join(path, 'repo.json')
+        repo_list_json_path = os.path.join(path, 'repo_list.json')
+        if os.path.basename(path) == 'repo.json':
+            self.load_repo_json(path)
+        elif os.path.basename(path) == 'repo_list.json':
+            self.load_repo_list_json(path)
+        elif os.path.exists(repo_json_path):
+            self.load_repo_json(repo_json_path)
+        else:
+            if os.path.exists(repo_list_json_path):
+                self.load_repo_list_json(repo_list_json_path)
+            if os.path.isdir(path):
+                for item in os.listdir(path):
+                    subpath = os.path.join(path, item)
+                    if os.path.isdir(subpath):
+                        self.load_dir(subpath)
+            else:
+                log_warning(path + ' is not a directory')
 
 def setup_command(args) -> None:
-    config_dir = get_directory_from_args(args, 'directory')
-    target_dir = get_directory_from_args(args, 'target')
-    if os.path.exists(os.path.join(target_dir, '.git')):
-        raise RuntimeError(target_dir + ' is a git directory, perhaps you meant ' + os.path.dirname(target_dir) + '?')
-    repo_name = os.path.basename(config_dir)
-    repo_dir = os.path.join(target_dir, repo_name)
-    assert repo_name
-    repo_json_path = os.path.join(config_dir, 'repo.json')
-    log('Loading config from ' + repo_json_path)
+    repo_dir = args.target
+    parent_dir = os.path.dirname(repo_dir)
+    if not os.path.isdir(parent_dir):
+        raise RuntimeError(parent_dir + ' is not a directory')
+    repo_name = args.repo if args.repo else os.path.basename(repo_dir)
     color = not args.no_color
-    with open(repo_json_path, 'r') as f:
-        try:
-            config = JsonConfig(json.load(f))
-        except (json.decoder.JSONDecodeError, AssertionError) as e:
-            raise RuntimeError(style_if('Failed to parse ' + repo_json_path + ': ' + str(e), '1;31', color))
+    db = ConfigDb()
+    for path in args.config:
+        db.load_dir(os.path.expanduser(path))
+    config = db.repos.get(repo_name)
+    if config is None:
+        raise RuntimeError(style_if(repo_name + ' repository is not known', '1;31', color))
     setup_repo_with_remotes(repo_dir, config.remotes)
     setup_repo_exclude(repo_dir, config.exclude)
-    symlink_all(config_dir, repo_dir)
+    if config.symlink_dir is not None:
+        symlink_all(config.symlink_dir, repo_dir)
     remove_dead_symlinks(repo_dir)
     print(style_if(repo_dir + ' set up successfully', '1;32', color))
 
@@ -342,8 +419,9 @@ if __name__ == '__main__':
 
     subparser = subparsers.add_parser('setup', help='Clone or set up a repo from configuration (see repo-json.md)')
     subparser.set_defaults(func=setup_command)
-    subparser.add_argument('directory', type=str, help='configuration directory that contains the repo.json file')
-    subparser.add_argument('target', nargs='?', type=str, help='parent directory of the repo to set up, default is current directory')
+    subparser.add_argument('-c', '--config', nargs='+', default=[default_config_path], type=str, help='directory that contains a repo.json file, repo_list.json file or other configuration directories')
+    subparser.add_argument('-r', '--repo', type=str, help='name of the repository')
+    subparser.add_argument('target', type=str, help='directory of the repo to set up')
 
     args = parser.parse_args()
 
