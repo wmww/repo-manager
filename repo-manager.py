@@ -5,7 +5,7 @@ import os
 import subprocess
 import re
 import json
-from typing import Optional
+from typing import Optional, Any
 
 verbose = False
 
@@ -238,12 +238,17 @@ def setup_repo_exclude(repo_dir: str, exclude: list[str]):
         original = f.read()
     section_start = '# <repo-manager>'
     section_end = '# </repo-manager>'
+    # list of non-repo-manager bits of the exclude file
     sections = re.split(re.escape(section_start) + r'.*?' + re.escape(section_end), original, flags=re.DOTALL)
-    to_add = '\n'.join([section_start] + exclude + [section_end])
-    sections.insert(1, to_add)
-    if len(sections) <= 2:
-        while not sections[0].endswith('\n\n'):
-            sections[0] += '\n'
+    if len(exclude) > 0:
+        to_add = [section_start] + exclude + [section_end]
+        if len(sections) == 1:
+            if not sections[0].endswith('\n\n'):
+                to_add.insert(0, '')
+            if not sections[0].endswith('\n'):
+                to_add.insert(0, '')
+            to_add.append('')
+        sections.insert(1, '\n'.join(to_add))
     result = ''.join(sections)
     if not result.endswith('\n'):
         result += '\n'
@@ -283,6 +288,25 @@ def remove_dead_symlinks(link_dir: str):
                 log('Removing broken symlink ' + item_path + ' (was pointing to ' + target + ')')
                 os.remove(item_path)
 
+def assert_type(value: Any, expected_type: Any, value_name: str):
+    assert isinstance(value, expected_type), (
+        str(value_name) + ' is type ' + str(type(value)) + ' instead of ' + str(expected_type)
+    )
+
+class JsonConfig:
+    def __init__(self, config: Any):
+        self.remotes: dict[str, str] = config.pop('remotes', None)
+        assert_type(self.remotes, dict, 'remotes')
+        for k, v in self.remotes.items():
+            assert_type(k, str, 'remote name')
+            assert_type(v, str, 'remote URL')
+        self.exclude: list[str] = config.pop('exclude', [])
+        assert_type(self.exclude, list, 'exclude')
+        for i, line in enumerate(self.exclude):
+            assert_type(line, str, 'exclude line ' + str(i + 1))
+        if config:
+            raise RuntimeError('unknown key(s): ' + ', '.join(config.keys()))
+
 def setup_command(args) -> None:
     config_dir = get_directory_from_args(args, 'directory')
     target_dir = get_directory_from_args(args, 'target')
@@ -293,24 +317,14 @@ def setup_command(args) -> None:
     assert repo_name
     repo_json_path = os.path.join(config_dir, 'repo.json')
     log('Loading config from ' + repo_json_path)
+    color = not args.no_color
     with open(repo_json_path, 'r') as f:
         try:
-            config = json.load(f)
-        except json.decoder.JSONDecodeError as e:
-            raise RuntimeError('Failed to parse ' + repo_json_path + ': ' + str(e))
-    remotes = config['remotes']
-    del config['remotes']
-    exclude = config['exclude']
-    del config['exclude']
-    color = not args.no_color
-    if config:
-        raise RuntimeError(style_if(
-            'Unknown key(s) in ' + repo_json_path + ': ' + ', '.join(config.keys()),
-            '1;31',
-            color
-        ))
-    setup_repo_with_remotes(repo_dir, remotes)
-    setup_repo_exclude(repo_dir, exclude)
+            config = JsonConfig(json.load(f))
+        except (json.decoder.JSONDecodeError, AssertionError) as e:
+            raise RuntimeError(style_if('Failed to parse ' + repo_json_path + ': ' + str(e), '1;31', color))
+    setup_repo_with_remotes(repo_dir, config.remotes)
+    setup_repo_exclude(repo_dir, config.exclude)
     symlink_all(config_dir, repo_dir)
     remove_dead_symlinks(repo_dir)
     print(style_if(repo_dir + ' set up successfully', '1;32', color))
@@ -344,4 +358,3 @@ if __name__ == '__main__':
         args.func(args)
     except RuntimeError as e:
         print('Error: ' + str(e), file=sys.stderr)
-
