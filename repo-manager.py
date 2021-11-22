@@ -296,10 +296,13 @@ def create_symlink(target: str, link: str):
     log('Linking ' + link + ' to ' + target)
     os.symlink(target, link)
 
-def symlink_all(target_dir: str, link_dir: str):
+def symlink_all(target_dir: str, link_dir: str) -> list[str]:
+    result = []
     for item in os.listdir(target_dir):
         if not item.startswith('.'):
             create_symlink(os.path.join(target_dir, item), os.path.join(link_dir, item))
+            result.append(item)
+    return result
 
 def remove_dead_symlinks(link_dir: str):
     for item in os.listdir(link_dir):
@@ -400,10 +403,11 @@ def setup_command(args) -> None:
     if config is None:
         raise RuntimeError(style_if(repo_name + ' repository is not known', '1;31', color))
     setup_repo_with_remotes(repo_dir, config.remotes)
-    setup_repo_exclude(repo_dir, config.exclude)
+    exclude = config.exclude
     if config.symlink_dir is not None:
-        symlink_all(config.symlink_dir, repo_dir)
+        exclude += symlink_all(config.symlink_dir, repo_dir)
     remove_dead_symlinks(repo_dir)
+    setup_repo_exclude(repo_dir, exclude)
     print(style_if(repo_dir + ' set up successfully', '1;32', color))
 
 if __name__ == '__main__':
