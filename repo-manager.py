@@ -387,7 +387,7 @@ class ConfigDb:
                 log_warning(path + ' is not a directory')
 
 def setup_command(args) -> None:
-    repo_dir = args.target
+    repo_dir = os.path.abspath(args.target)
     parent_dir = os.path.dirname(repo_dir)
     if not os.path.isdir(parent_dir):
         raise RuntimeError(parent_dir + ' is not a directory')
