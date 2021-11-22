@@ -331,6 +331,11 @@ class RepoConfig:
         self.symlink_dir = config_dir
         self.remotes: dict[str, str] = config.pop('remotes', {})
         assert_type(self.remotes, dict, 'remotes')
+        origin: Optional[str] = config.pop('origin', None)
+        if origin is not None:
+            assert_type(origin, str, 'origin')
+            assert len(self.remotes) == 0, 'origin key can not be used if remotes are specified'
+            self.remotes['origin'] = origin
         for k, v in self.remotes.items():
             assert_type(k, str, 'remote name')
             assert_type(v, str, 'remote URL')
