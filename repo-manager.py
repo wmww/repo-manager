@@ -219,12 +219,20 @@ def scan_command(args) -> None:
     else:
         print(style_if('No dirty repos', '1;32', color))
 
+def default_remote_url(remotes: dict[str, str]) -> str:
+    if len(remotes) == 0:
+        raise RuntimeError('No remotes')
+    return remotes.get('origin', list(remotes.values())[0])
+
+def name_from_git_url(url: str) -> str:
+    return url.rsplit('.', 1)[0].rsplit('/', 1)[-1]
+
 def setup_repo_with_remotes(repo_dir: str, remotes: dict[str, str]):
     preexisting = os.path.exists(repo_dir)
     if not preexisting:
         parent = os.path.dirname(repo_dir)
         assert os.path.exists(parent), parent + ' does not exist'
-        remote_url = remotes.get('origin', list(remotes.values())[0])
+        remote_url = default_remote_url(remotes)
         log('Cloning ' + remote_url + ' into ' + repo_dir)
         Run(['git', 'clone', remote_url, repo_dir], passthrough=True, raise_on_fail=True)
     parsed = GitRepo(repo_dir, Context())
@@ -321,7 +329,7 @@ def assert_type(value: Any, expected_type: Any, value_name: str):
 class RepoConfig:
     def __init__(self, config_dir: Optional[str], config: Any):
         self.symlink_dir = config_dir
-        self.remotes: dict[str, str] = config.pop('remotes', None)
+        self.remotes: dict[str, str] = config.pop('remotes', {})
         assert_type(self.remotes, dict, 'remotes')
         for k, v in self.remotes.items():
             assert_type(k, str, 'remote name')
@@ -330,7 +338,11 @@ class RepoConfig:
         assert_type(self.exclude, list, 'exclude')
         for i, line in enumerate(self.exclude):
             assert_type(line, str, 'exclude line ' + str(i + 1))
-        self.name: str = config.pop('name', os.path.basename(config_dir) if config_dir else None)
+        self.name: str = config.pop('name', None)
+        if self.name is None and config_dir is not None:
+            self.name = os.path.basename(config_dir)
+        if self.name is None and self.remotes:
+            self.name = name_from_git_url(default_remote_url(self.remotes))
         assert self.name, 'name must be specified'
         assert_type(self.name, str, 'name')
         config.pop('//', None)
