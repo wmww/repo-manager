@@ -236,20 +236,6 @@ def setup_repo_with_remotes(repo_dir: str, remotes: dict[str, str]):
         log('Cloning ' + remote_url + ' into ' + repo_dir)
         Run(['git', 'clone', remote_url, repo_dir], passthrough=True, raise_on_fail=True)
     parsed = GitRepo(repo_dir, Context())
-    found_match = False
-    for repo_name, repo_url in parsed.remotes.items():
-        for requested_name, requested_url in remotes.items():
-            if repo_url == requested_url:
-                found_match = True
-                break
-        if found_match:
-            break
-    if not found_match:
-        raise RuntimeError(
-            'None of the remotes in existing repo ' +
-            repo_dir +
-            ' match match any of the specified remotes: ' +
-            ' '.join(remotes.values()))
     for name, url in remotes.items():
         if name not in parsed.remotes or url != parsed.remotes[name]:
             if name in parsed.remotes:
