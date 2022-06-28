@@ -34,7 +34,7 @@ class Run:
         path: Optional[str] = None,
         passthrough=False,
         raise_on_fail=False
-    ):
+    ) -> None:
         log('Running `' + ' '.join(arg_list) + '`')
         io = None if passthrough else subprocess.PIPE
         p = subprocess.Popen(arg_list, cwd=path, stdout=io, stderr=io)
@@ -73,6 +73,7 @@ class GitRepo:
     def __init__(self, base: str, ctx: Context):
         assert os.path.isdir(os.path.join(base, '.git'))
         assert not os.path.islink(base)
+        self.path = base
         log('Scanning Git repo at ' + base + '...')
         status_output = Run(['git', 'status'], path=base, raise_on_fail=True).stdout
         remotes_output = Run(['git', 'remote', '-v'], path=base, raise_on_fail=True).stdout
@@ -93,6 +94,23 @@ class GitRepo:
         else:
             ctx.clean_repos += 1
         log('... Scanned ' + base + ' done')
+
+    def default_local_branch(self) -> str:
+        all_local_branches = Run(
+            ['git', 'branch', '--format=%(refname:short)'],
+            path=self.path,
+            raise_on_fail=True
+        ).stdout.strip().split()
+        if len(all_local_branches) == 1:
+            return all_local_branches[0]
+        default_branch_names = ['master', 'main', 'trunk']
+        default_branches = [i for i in default_branch_names if i in all_local_branches]
+        assert len(default_branches) >= 1, 'Could not detect any default branches in ' + self.path
+        assert len(default_branches) <= 1, 'Multiple default branches in ' + self.path + ' (' + ', '.join(default_branches) + ')'
+        return default_branches[0]
+
+    def default_upstream_branch(self) -> str:
+        return Run(['git', 'rev-parse', '--abbrev-ref', 'origin'], path=self.path, raise_on_fail=True).stdout.strip()
 
     def is_problem(self) -> bool:
         return not self.working_tree_clean or not self.remotes or not self.synced_with_remote
@@ -414,6 +432,25 @@ def setup_command(args) -> None:
     setup_repo_exclude(repo_dir, exclude)
     print(style_if(repo_dir + ' set up successfully', '1;32', color))
 
+def fix_default_branch_command(args) -> None:
+    repo_dir = os.path.abspath(args.target)
+    color = not args.no_color
+    print(style_if(repo_dir + ' set up successfully', '1;32', color))
+    ctx = Context()
+    repo = GitRepo(repo_dir, ctx)
+    Run(['git', 'fetch'], path=repo.path, raise_on_fail=True).stdout.strip()
+    Run(['git', 'remote', 'set-head', 'origin', '-a'], path=repo.path, raise_on_fail=True)
+    default_upstream = repo.default_upstream_branch()
+    default_local = repo.default_local_branch()
+    locals_upstream = Run(
+        ['git', 'rev-parse', '--abbrev-ref', default_local + '@{upstream}'],
+        path=repo.path,
+        raise_on_fail=True
+    ).stdout.strip()
+    if locals_upstream != default_upstream:
+        log('Changing ' + default_local + '\'s upstream from ' + locals_upstream + ' to ' + default_upstream)
+        Run(['git', 'branch', '-u', default_upstream, default_local], path=repo.path, raise_on_fail=True)
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Manage a directory containing git repos')
@@ -430,6 +467,10 @@ if __name__ == '__main__':
     subparser.add_argument('-c', '--config', nargs='+', default=[default_config_path], type=str, help='directory that contains a repo.json file, repo_list.json file or other configuration directories')
     subparser.add_argument('-r', '--repo', type=str, help='name of the repository')
     subparser.add_argument('target', type=str, help='directory of the repo to set up')
+
+    subparser = subparsers.add_parser('fix-default-branch', help='Update and rename the local and remote default branch')
+    subparser.set_defaults(func=fix_default_branch_command)
+    subparser.add_argument('target', type=str, help='directory of the git repo to update')
 
     args = parser.parse_args()
 
