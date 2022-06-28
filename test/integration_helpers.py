@@ -24,23 +24,30 @@ def run_setup_command(command: SetupCommand) -> None:
     elif command is not None:
         assert False
 
-class MkDir(SetupCommandBase):
+class InDir(SetupCommandBase):
     def __init__(self, path: str, sub_command: SetupCommand) -> None:
         self.path = path
         self.sub_command = sub_command
 
     def run(self) -> None:
-        os.makedirs(self.path)
         cwd = os.getcwd()
         os.chdir(self.path)
         run_setup_command(self.sub_command)
         os.chdir(cwd)
 
+class MkDir(InDir):
+    def run(self) -> None:
+        os.makedirs(self.path)
+        super().run()
+
 class InitRepo(SetupCommandBase):
+    def __init__(self, initial_branch: str = 'main') -> None:
+        self.initial_branch = initial_branch
+
     def run(self) -> None:
         run_setup_command([
             'echo foo > file.txt',
-            'git init',
+            'git init --initial-branch=' + self.initial_branch,
             'git add .',
             'git commit -m initial',
         ])
@@ -65,6 +72,14 @@ def init_test(home: SetupCommand, config: SetupCommand = None) -> None:
     os.chdir(temp_dir_parent)
     MkDir(temp_dir_home, home).run()
     MkDir(temp_dir_config, config).run()
+
+def output_of(command: str) -> str:
+    os.chdir(temp_dir_home)
+    return subprocess.run(['bash', '-c', command], encoding='utf-8', capture_output=True, check=True).stdout.strip()
+
+def contents_of(path: str) -> str:
+    with open(path, 'r') as f:
+        return f.read()
 
 class Result:
     def __init__(self, stdout: str) -> None:
