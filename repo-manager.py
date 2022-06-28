@@ -133,20 +133,21 @@ class Directory:
         assert os.path.isdir(base)
         log('Scanning directory at ' + base + '...')
         self.contents = {}
-        self.contains_git_repo = False
+        self.contains_code_repo = False
         for sub in os.listdir(base):
             if not sub.startswith('.'): # ignore hidden files
                  scanned = scan_path(os.path.join(base, sub), ctx)
                  if (isinstance(scanned, GitRepo) or
+                     isinstance(scanned, MercurialRepo) or
                         (isinstance(scanned, Directory) and
-                        scanned.contains_git_repo)):
-                    self.contains_git_repo = True
+                        scanned.contains_code_repo)):
+                    self.contains_code_repo = True
                  self.contents[sub] = scanned
         log('... Scanning ' + base + ' done')
 
     def __str__(self, color=False) -> str:
-        if not self.contains_git_repo:
-            result = 'Directory without git repos'
+        if not self.contains_code_repo:
+            result = 'Directory without repos'
             if color:
                 result = style('1;34') + result + style(None)
             return result
